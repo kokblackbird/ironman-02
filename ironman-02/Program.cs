@@ -560,6 +560,96 @@ class Program
  Console.WriteLine($"Failed to save HTML export: {ex.Message}");
  }
 
+ // === INVOICE / QUOTE EXPORT (HTML BREAKDOWN WITH BAR GRAPH) ===
+ try
+ {
+ string htmlDir = @"C:\\temp";
+ Directory.CreateDirectory(htmlDir);
+ string htmlFile2 = Path.Combine(htmlDir, $"{docTitle}_{DateTime.Now:yyyyMMdd_HHmmss}_breakdown.html");
+ string enc(string s) => WebUtility.HtmlEncode(s ?? string.Empty);
+
+ // Build category values based on final totals
+ decimal materialsCategory = Math.Round(materialsPassThroughCost + materialsGrossFromEligible,2);
+ decimal laborCategory = Math.Round(laborLikeGrossFromEligible,2);
+ decimal handlingCategory = Math.Round(handlingFeesTotal,2);
+ decimal wasteCategory = Math.Round(wasteFeesTotal,2);
+ decimal storageCategory = Math.Round(vehicleStorageHandlingFee,2);
+ decimal minAdjCategory = Math.Round(Math.Max(0m, priceBeforeTaxFinal - priceBeforeTaxRecommended),2);
+ decimal taxesCategory = Math.Round(customerTaxOnFinal,2);
+
+ decimal preTaxSum = materialsCategory + laborCategory + handlingCategory + wasteCategory + storageCategory + minAdjCategory;
+ decimal totalForBars = Math.Max(outTheDoorFinal, preTaxSum + taxesCategory);
+ decimal pct(decimal val) => totalForBars <=0m ?0m : Math.Min(100m, Math.Round((val / totalForBars) *100m,2));
+
+ string barRow(string label, decimal val, string color)
+ {
+ var percent = pct(val).ToString("0.##", ci);
+ return $"<div class=\"row\"><div class=\"label\">{enc(label)}</div><div class=\"bar\"><div class=\"fill\" style=\"width:{percent}%;background:{color}\"></div></div><div class=\"value\">{val.ToString("C", ci)}<div class=\"muted small\">{percent}%</div></div></div>";
+ }
+
+ var chart = new StringBuilder();
+ chart.Append("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+ chart.Append("<title>").Append(enc(docTitle)).Append(" Breakdown</title>");
+ chart.Append("<style>");
+ chart.Append("body{font-family:Segoe UI,Arial,sans-serif;margin:40px;color:#1a1a1a;background:#f7f7f9;}\n");
+ chart.Append(".card{max-width:960px;margin:0 auto;background:#fff;border-radius:12px;box-shadow:08px24px rgba(0,0,0,.08);overflow:hidden;}\n");
+ chart.Append("header{display:flex;justify-content:space-between;align-items:center;padding:28px36px;border-bottom:1px solid #eee;background:linear-gradient(180deg,#fff,#fafafa);}\n");
+ chart.Append("h1{font-size:22px;margin:0;} .muted{color:#666;} .small{font-size:12px;}\n");
+ chart.Append(".section{padding:26px36px;border-bottom:1px solid #f0f0f0;}\n");
+ chart.Append(".rows{margin-top:8px;} .row{display:flex;align-items:center;gap:12px;margin:10px0;}\n");
+ chart.Append(".label{width:210px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}\n");
+ chart.Append(".bar{flex:1;height:20px;background:#eef2f8;border-radius:8px;overflow:hidden;position:relative;} .fill{height:100%;border-radius:8px;}\n");
+ chart.Append(".value{width:150px;text-align:right;}\n");
+ chart.Append(".legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:12px;} .pill{display:inline-flex;align-items:center;gap:8px;padding:4px10px;border-radius:999px;border:1px solid #e3e6ef;background:#fafbff;} .dot{width:10px;height:10px;border-radius:50%;} \n");
+ chart.Append(".footer{padding:22px36px;color:#555;font-size:13px;background:#fafafa;}\n");
+ chart.Append("</style></head><body>");
+ chart.Append("<div class=\"card\">");
+ chart.Append("<header><div><h1>").Append(enc(docTitle)).Append(" – Price Breakdown</h1>");
+ chart.Append("<div class=\"muted\">Date: ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm")).Append("</div>");
+ if (!string.IsNullOrWhiteSpace(customerName)) chart.Append("<div class=\"muted\">Customer: ").Append(enc(customerName)).Append("</div>");
+ chart.Append("</div>");
+ chart.Append("<div class=\"right\"><div class=\"muted\">Technician</div><div>").Append(enc(techName)).Append("</div>");
+ if (!string.IsNullOrWhiteSpace(techPhone)) chart.Append("<div class=\"muted\">Phone: ").Append(enc(techPhone)).Append("</div>");
+ if (!string.IsNullOrWhiteSpace(techEmail)) chart.Append("<div class=\"muted\">Email: ").Append(enc(techEmail)).Append("</div>");
+ chart.Append("</div></header>");
+
+ chart.Append("<div class=\"section\"><div class=\"muted\">Totals</div>");
+ chart.Append("<div style=\"margin-top:6px\">Pre-tax total: <strong>").Append(priceBeforeTaxFinal.ToString("C", ci)).Append("</strong></div>");
+ chart.Append("<div>Sales tax: <strong>").Append(taxesCategory.ToString("C", ci)).Append("</strong></div>");
+ chart.Append("<div>Out-the-door total: <strong>").Append(outTheDoorFinal.ToString("C", ci)).Append("</strong></div>");
+ chart.Append("</div>");
+
+ chart.Append("<div class=\"section\"><div class=\"muted\">Breakdown</div><div class=\"rows\">");
+ chart.Append(barRow("Materials (parts+shipping)", materialsCategory, "#4c78a8"));
+ chart.Append(barRow("Labor + Research", laborCategory, "#59a14f"));
+ chart.Append(barRow("Per-item Handling (large/bulky)", handlingCategory, "#af7aa1"));
+ chart.Append(barRow("Waste/Recycling fees", wasteCategory, "#f28e2b"));
+ chart.Append(barRow("Vehicle storage/handling", storageCategory, "#b6992d"));
+ if (minAdjCategory >0m) chart.Append(barRow("Minimum invoice adjustment", minAdjCategory, "#2ca9b7"));
+ chart.Append(barRow("Sales tax", taxesCategory, "#e45756"));
+ chart.Append("</div>");
+
+ chart.Append("<div class=\"legend\">");
+ chart.Append("<span class=\"pill\"><span class=\"dot\" style=\"background:#4c78a8\"></span>Materials</span>");
+ chart.Append("<span class=\"pill\"><span class=\"dot\" style=\"background:#59a14f\"></span>Labor+Research</span>");
+ chart.Append("<span class=\"pill\"><span class=\"dot\" style=\"background:#af7aa1\"></span>Handling</span>");
+ chart.Append("<span class=\"pill\"><span class=\"dot\" style=\"background:#f28e2b\"></span>Waste</span>");
+ chart.Append("<span class=\"pill\"><span class=\"dot\" style=\"background:#b6992d\"></span>Vehicle storage</span>");
+ chart.Append("<span class=\"pill\"><span class=\"dot\" style=\"background:#2ca9b7\"></span>Minimum adj.</span>");
+ chart.Append("<span class=\"pill\"><span class=\"dot\" style=\"background:#e45756\"></span>Sales tax</span>");
+ chart.Append("</div></div>");
+
+ chart.Append("<div class=\"footer\"><span class=\"muted\">Generated by Automotive Repair Pricing Helper</span></div>");
+ chart.Append("</div></body></html>");
+
+ File.WriteAllText(htmlFile2, chart.ToString());
+ Console.WriteLine($"Saved {docTitle.ToLowerInvariant()} (html breakdown) to: {htmlFile2}");
+ }
+ catch (Exception ex)
+ {
+ Console.WriteLine($"Failed to save breakdown HTML export: {ex.Message}");
+ }
+
  // === SAVE CURRENT PARAMETERS TO CSVs ===
  try
  {
